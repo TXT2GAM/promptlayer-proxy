@@ -95,7 +95,10 @@ async function parseMessages(req, res, next) {
   }
 }
 
-async function getChatID(req) {
+async function getChatID(req, retryCount = 0) {
+  const maxRetries = 3
+  const retryDelay = 1000 * (retryCount + 1) // 递增延迟
+
   try {
     const url = 'https://api.promptlayer.com/api/dashboard/v2/workspaces/' + req.account.workspaceId + '/playground_sessions'
     const headers = { Authorization: "Bearer " + req.account.token }
@@ -119,53 +122,111 @@ async function getChatID(req) {
       },
       "input_variables": []
     }
-    const response = await axios.put(url, data, { headers })
+
+    const response = await axios.put(url, data, {
+      headers,
+      timeout: 30000, // 30秒超时
+      retry: {
+        retries: 0 // 这里不重试，由外层函数处理
+      }
+    })
+
     if (response.data.success) {
       console.log(`生成会话ID成功: ${response.data.playground_session.id}`)
       req.chatID = response.data.playground_session.id
       return response.data.playground_session.id
     } else {
-      return false
+      throw new Error(`API返回失败: ${JSON.stringify(response.data)}`)
     }
   } catch (error) {
-    console.error("错误:", error.response.data)
-    return false
+    console.error(`获取ChatID失败 (尝试 ${retryCount + 1}/${maxRetries + 1}):`, error.message)
+
+    // 检查是否需要重试
+    if (retryCount < maxRetries) {
+      // 检查错误类型，决定是否重试
+      const shouldRetry = error.code === 'ECONNRESET' ||
+                         error.code === 'ETIMEDOUT' ||
+                         error.code === 'ENOTFOUND' ||
+                         error.code === 'ECONNREFUSED' ||
+                         (error.response && [429, 502, 503, 504].includes(error.response.status))
+
+      if (shouldRetry) {
+        console.log(`${retryDelay}ms 后重试...`)
+        await new Promise(resolve => setTimeout(resolve, retryDelay))
+        return await getChatID(req, retryCount + 1)
+      }
+    }
+
+    throw error
   }
 }
 
-async function sentRequest(req) {
-  const url = 'https://api.promptlayer.com/api/dashboard/v2/workspaces/' + req.account.workspaceId + '/run_groups'
-  const headers = { Authorization: "Bearer " + req.account.token }
+async function sentRequest(req, retryCount = 0) {
+  const maxRetries = 3
+  const retryDelay = 1000 * (retryCount + 1) // 递增延迟
 
-  let data = {
-    "id": uuidv4(),
-    "playground_session_id": req.chatID,
-    "shared_prompt_blueprint": {
-      "inference_client_name": null,
-      "metadata": {
-        "model": modelMap[req.body.model] ? modelMap[req.body.model] : modelMap["claude-3-7-sonnet-20250219"]
+  try {
+    const url = 'https://api.promptlayer.com/api/dashboard/v2/workspaces/' + req.account.workspaceId + '/run_groups'
+    const headers = { Authorization: "Bearer " + req.account.token }
+
+    let data = {
+      "id": uuidv4(),
+      "playground_session_id": req.chatID,
+      "shared_prompt_blueprint": {
+        "inference_client_name": null,
+        "metadata": {
+          "model": modelMap[req.body.model] ? modelMap[req.body.model] : modelMap["claude-3-7-sonnet-20250219"]
+        },
+        "prompt_template": {
+          "type": "chat",
+          "messages": req.body.messages,
+          "tools": null,
+          "input_variables": [],
+          "functions": []
+        },
+        "provider_base_url_name": null
       },
-      "prompt_template": {
-        "type": "chat",
-        "messages": req.body.messages,
-        "tools": null,
-        "input_variables": [],
-        "functions": []
-      },
-      "provider_base_url_name": null
-    },
-    "individual_run_requests": [
-      {
-        "input_variables": {},
-        "run_group_position": 1
+      "individual_run_requests": [
+        {
+          "input_variables": {},
+          "run_group_position": 1
+        }
+      ]
+    }
+
+    const response = await axios.post(url, data, {
+      headers,
+      timeout: 30000, // 30秒超时
+      retry: {
+        retries: 0 // 这里不重试，由外层函数处理
       }
-    ]
-  }
-  const response = await axios.post(url, data, { headers })
-  if (response.data.success) {
-    return response.data.run_group.individual_run_requests[0].id
-  } else {
-    return false
+    })
+
+    if (response.data.success) {
+      return response.data.run_group.individual_run_requests[0].id
+    } else {
+      throw new Error(`API返回失败: ${JSON.stringify(response.data)}`)
+    }
+  } catch (error) {
+    console.error(`发送请求失败 (尝试 ${retryCount + 1}/${maxRetries + 1}):`, error.message)
+
+    // 检查是否需要重试
+    if (retryCount < maxRetries) {
+      // 检查错误类型，决定是否重试
+      const shouldRetry = error.code === 'ECONNRESET' ||
+                         error.code === 'ETIMEDOUT' ||
+                         error.code === 'ENOTFOUND' ||
+                         error.code === 'ECONNREFUSED' ||
+                         (error.response && [429, 502, 503, 504].includes(error.response.status))
+
+      if (shouldRetry) {
+        console.log(`${retryDelay}ms 后重试...`)
+        await new Promise(resolve => setTimeout(resolve, retryDelay))
+        return await sentRequest(req, retryCount + 1)
+      }
+    }
+
+    throw error
   }
 }
 
@@ -175,20 +236,29 @@ router.post('/v1/chat/completions', verify, parseMessages, async (req, res) => {
 
   let ws = null // WebSocket引用
   let requestTimeout = null // 超时定时器引用
+  let isCleanedUp = false // 防止重复清理
 
   // 资源清理函数
   const cleanup = () => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.close()
+    if (isCleanedUp) return // 防止重复清理
+    isCleanedUp = true
+
+    try {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close()
+      }
+    } catch (err) {
+      console.error("关闭WebSocket时出错:", err)
     }
-    if (requestTimeout) {
-      clearTimeout(requestTimeout)
+
+    try {
+      if (requestTimeout) {
+        clearTimeout(requestTimeout)
+      }
+    } catch (err) {
+      console.error("清除超时定时器时出错:", err)
     }
   }
-
-  // 确保在响应结束时清理资源
-  res.on('close', cleanup)
-  res.on('finish', cleanup)
 
   try {
 
@@ -208,16 +278,81 @@ router.post('/v1/chat/completions', verify, parseMessages, async (req, res) => {
     setHeader()
 
     const { access_token, clientId } = req.account
-    // 生成会话ID
-    await getChatID(req)
+
+    // 生成会话ID - 现在有重试机制
+    try {
+      await getChatID(req)
+    } catch (error) {
+      console.error("生成会话ID失败:", error.message)
+      return res.status(500).json({
+        "error": {
+          "message": "无法创建会话，请稍后重试",
+          "type": "server_error",
+          "param": null,
+          "code": "session_creation_failed"
+        }
+      })
+    }
 
     // 发送的数据
     const sendAction = `{"action":10,"channel":"user:${clientId}","params":{"agent":"react-hooks/2.0.2"}}`
     // 构建 WebSocket URL
     const wsUrl = `wss://realtime.ably.io/?access_token=${encodeURIComponent(access_token)}&clientId=${clientId}&format=json&heartbeats=true&v=3&agent=ably-js%2F2.0.2%20browser`
 
-    // 创建 WebSocket 连接
-    ws = new WebSocket(wsUrl)
+    // WebSocket 连接重试逻辑
+    const createWebSocketConnection = () => {
+      return new Promise((resolve, reject) => {
+        const ws = new WebSocket(wsUrl)
+        let connectionTimeout = setTimeout(() => {
+          ws.close()
+          reject(new Error('WebSocket连接超时'))
+        }, 15000) // 15秒连接超时
+
+        ws.on('open', () => {
+          clearTimeout(connectionTimeout)
+          console.log('WebSocket连接已建立')
+          resolve(ws)
+        })
+
+        ws.on('error', (error) => {
+          clearTimeout(connectionTimeout)
+          console.error('WebSocket连接错误:', error)
+          reject(error)
+        })
+      })
+    }
+
+    // 尝试建立 WebSocket 连接，最多重试3次
+    let wsRetries = 0
+    const maxWsRetries = 3
+
+    while (wsRetries <= maxWsRetries) {
+      try {
+        ws = await createWebSocketConnection()
+        break
+      } catch (error) {
+        wsRetries++
+        console.error(`WebSocket连接失败 (尝试 ${wsRetries}/${maxWsRetries + 1}):`, error.message)
+
+        if (wsRetries > maxWsRetries) {
+          return res.status(500).json({
+            "error": {
+              "message": "无法建立连接，请稍后重试",
+              "type": "server_error",
+              "param": null,
+              "code": "connection_failed"
+            }
+          })
+        }
+
+        // 等待后重试
+        await new Promise(resolve => setTimeout(resolve, 1000 * wsRetries))
+      }
+    }
+
+    // 现在注册响应事件监听器，确保WebSocket已创建
+    res.on('close', cleanup)
+    res.on('finish', cleanup)
 
     // 状态详细
     let ThinkingLastContent = ""
@@ -244,8 +379,23 @@ router.post('/v1/chat/completions', verify, parseMessages, async (req, res) => {
     }
 
     ws.on('open', async () => {
-      ws.send(sendAction)
-      RequestID = await sentRequest(req)
+      try {
+        ws.send(sendAction)
+        RequestID = await sentRequest(req)
+      } catch (error) {
+        console.error("发送请求失败:", error)
+        cleanup()
+        if (!res.headersSent) {
+          res.status(500).json({
+            "error": {
+              "message": "请求处理失败",
+              "type": "server_error",
+              "param": null,
+              "code": "request_failed"
+            }
+          })
+        }
+      }
     })
 
     ws.on('message', async (data) => {

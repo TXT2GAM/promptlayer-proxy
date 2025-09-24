@@ -1,6 +1,6 @@
 const manager = require('../lib/manager')
 
-const verify = async (req, res, next) => {
+const verify = (req, res, next) => {
   try {
     const authorization = req.headers.authorization
     if (!authorization) {

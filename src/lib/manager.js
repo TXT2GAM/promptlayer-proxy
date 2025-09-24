@@ -115,8 +115,33 @@ class Manager {
   }
 
   async refreshToken() {
-    this.accounts = []
-    this.init(process.env.ACCOUNTS)
+    console.log("开始刷新账户token...")
+    const oldAccounts = this.accounts // 保留旧账户作为备份
+    try {
+      const newAccounts = []
+      const accounts = process.env.ACCOUNTS.split(",").filter(account => account.trim() !== "")
+
+      for (const account of accounts) {
+        const [username, password] = account.split(":")
+        const account_result = await this.initAccount(username, password)
+        if (account_result) {
+          console.log(`刷新账户成功: ${username}`)
+          newAccounts.push(account_result)
+        }
+      }
+
+      // 只有在成功初始化新账户后才替换旧账户
+      if (newAccounts.length > 0) {
+        this.accounts = newAccounts
+        console.log(`账户刷新完成，共${newAccounts.length}个可用账户`)
+      } else {
+        console.warn("刷新失败，保留原有账户")
+        // 保持原有账户不变
+      }
+    } catch (error) {
+      console.error("刷新账户时出错:", error)
+      // 出错时保持原有账户不变
+    }
   }
 
 
