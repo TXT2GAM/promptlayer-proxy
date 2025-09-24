@@ -5,7 +5,7 @@ class Manager {
   constructor(accounts) {
     this.accounts = []
     this.init(accounts)
-    this.current_account = 0
+    // 移除不必要的 current_account 属性
     this.interval = setInterval(() => {
       this.refreshToken()
     }, 1000 * 60 * 60 * 24 * 5)
@@ -99,11 +99,18 @@ class Manager {
   }
 
   getAccount() {
-    const account = this.accounts[this.current_account]
-    this.current_account++
-    if (this.current_account >= this.accounts.length) {
-      this.current_account = 0
+    if (this.accounts.length === 0) {
+      throw new Error("没有可用的账户")
     }
+
+    // 使用随机选择避免竞态条件，而不是轮换
+    const randomIndex = Math.floor(Math.random() * this.accounts.length)
+    const account = this.accounts[randomIndex]
+
+    if (!account) {
+      throw new Error("获取到的账户无效")
+    }
+
     return account
   }
 

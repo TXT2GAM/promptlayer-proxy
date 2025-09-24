@@ -8,5 +8,5 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - ACCOUNTS=your_cookies_here
+      - ACCOUNTS=email1:password1,...
       - AUTH_TOKEN=sk-123456

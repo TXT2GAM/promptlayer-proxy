@@ -173,6 +173,23 @@ async function sentRequest(req) {
 router.post('/v1/chat/completions', verify, parseMessages, async (req, res) => {
   // console.log(JSON.stringify(req.body))
 
+  let ws = null // WebSocket引用
+  let requestTimeout = null // 超时定时器引用
+
+  // 资源清理函数
+  const cleanup = () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close()
+    }
+    if (requestTimeout) {
+      clearTimeout(requestTimeout)
+    }
+  }
+
+  // 确保在响应结束时清理资源
+  res.on('close', cleanup)
+  res.on('finish', cleanup)
+
   try {
 
     let isSetHeader = false
@@ -198,8 +215,9 @@ router.post('/v1/chat/completions', verify, parseMessages, async (req, res) => {
     const sendAction = `{"action":10,"channel":"user:${clientId}","params":{"agent":"react-hooks/2.0.2"}}`
     // 构建 WebSocket URL
     const wsUrl = `wss://realtime.ably.io/?access_token=${encodeURIComponent(access_token)}&clientId=${clientId}&format=json&heartbeats=true&v=3&agent=ably-js%2F2.0.2%20browser`
+
     // 创建 WebSocket 连接
-    const ws = new WebSocket(wsUrl)
+    ws = new WebSocket(wsUrl)
 
     // 状态详细
     let ThinkingLastContent = ""
@@ -324,7 +342,7 @@ router.post('/v1/chat/completions', verify, parseMessages, async (req, res) => {
             res.write(`data: [DONE]\n\n`)
             res.end()
           }
-          ws.close()
+          cleanup() // 清理资源
         }
 
       } catch (err) {
@@ -333,20 +351,32 @@ router.post('/v1/chat/completions', verify, parseMessages, async (req, res) => {
     })
 
     ws.on('error', (err) => {
-      // 标准OpenAI错误响应格式
-      res.status(500).json({
-        "error": {
-          "message": err.message,
-          "type": "server_error",
-          "param": null,
-          "code": "server_error"
-        }
-      })
+      console.error("WebSocket连接错误:", err)
+      cleanup() // 清理资源
+
+      if (!res.headersSent) {
+        // 标准OpenAI错误响应格式
+        res.status(500).json({
+          "error": {
+            "message": err.message,
+            "type": "server_error",
+            "param": null,
+            "code": "server_error"
+          }
+        })
+      }
     })
 
-    setTimeout(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close()
+    ws.on('close', (code, reason) => {
+      console.log(`WebSocket连接关闭: ${code} ${reason}`)
+      cleanup() // 清理资源
+    })
+
+    // 设置请求超时
+    requestTimeout = setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        console.log("请求超时，关闭WebSocket连接")
+        cleanup()
         if (!res.headersSent) {
           // 标准OpenAI超时错误响应格式
           res.status(504).json({
@@ -362,16 +392,20 @@ router.post('/v1/chat/completions', verify, parseMessages, async (req, res) => {
     }, 300 * 1000)
 
   } catch (error) {
-    console.error("错误:", error)
-    // 标准OpenAI通用错误响应格式
-    res.status(500).json({
-      "error": {
-        "message": error.message || "服务器内部错误",
-        "type": "server_error",
-        "param": null,
-        "code": "server_error"
-      }
-    })
+    console.error("请求处理错误:", error)
+    cleanup() // 确保清理资源
+
+    if (!res.headersSent) {
+      // 标准OpenAI通用错误响应格式
+      res.status(500).json({
+        "error": {
+          "message": error.message || "服务器内部错误",
+          "type": "server_error",
+          "param": null,
+          "code": "server_error"
+        }
+      })
+    }
   }
 })
 
