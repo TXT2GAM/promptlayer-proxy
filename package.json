@@ -1,5 +1,5 @@
 {
-  "name": "claude-api-server",
+  "name": "promptlayer-proxy",
   "version": "1.0.0",
   "description": "",
   "main": "src/server.js",
@@ -8,10 +8,6 @@
     "dev": "nodemon src/server.js"
   },
   "keywords": [
-    "api",
-    "claude",
-    "openai",
-    "express"
   ],
   "author": "",
   "license": "ISC",

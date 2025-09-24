@@ -1,10 +1,12 @@
 services:
-  mammouth-proxy:
-    image: rfym21/promptlayer-proxy:latest
+  promptlayer-proxy:
+    build: 
+      context: .
+      dockerfile: Dockerfile
     container_name: promptlayer-proxy
     restart: always
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
-      - COOKIES=your_cookies_here  # 填入promptlayer账号密码，账号密码之间用:隔开，多个账号用逗号分隔
-      - AUTH_TOKEN=your_auth_token_here  # 设置API认证密钥
+      - ACCOUNTS=your_cookies_here
+      - AUTH_TOKEN=sk-123456
