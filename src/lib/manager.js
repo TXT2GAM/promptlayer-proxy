@@ -5,7 +5,8 @@ class Manager {
   constructor(accounts) {
     this.accounts = []
     this.init(accounts)
-    // 移除不必要的 current_account 属性
+    this.current_account = 0 // 恢复轮询索引
+    this.accountLock = false // 添加锁防止竞态条件
     this.interval = setInterval(() => {
       this.refreshToken()
     }, 1000 * 60 * 60 * 24 * 5)
@@ -103,15 +104,24 @@ class Manager {
       throw new Error("没有可用的账户")
     }
 
-    // 使用随机选择避免竞态条件，而不是轮换
-    const randomIndex = Math.floor(Math.random() * this.accounts.length)
-    const account = this.accounts[randomIndex]
+    // 使用原子操作实现严格轮询
+    let account
+    const maxRetries = this.accounts.length * 2 // 防止无限循环
 
-    if (!account) {
-      throw new Error("获取到的账户无效")
+    for (let i = 0; i < maxRetries; i++) {
+      // 原子地获取并递增索引
+      const currentIndex = this.current_account
+      this.current_account = (this.current_account + 1) % this.accounts.length
+
+      account = this.accounts[currentIndex]
+
+      if (account) {
+        console.log(`使用账户 ${currentIndex + 1}/${this.accounts.length}`)
+        return account
+      }
     }
 
-    return account
+    throw new Error("所有账户都不可用")
   }
 
   async refreshToken() {
