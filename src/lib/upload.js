@@ -32,7 +32,7 @@ async function uploadFileBuffer(fileBuffer) {
     }
 
     // 发送请求
-    const response = await axios.post('https://api.promptlayer.com/upload', form, { headers })
+    const response = await axios.post('https://promptlayer.acips.workers.dev/upload', form, { headers })
     
     // 如果上传成功，添加到缓存
     if (response.data && response.data.success && response.data.file_url) {

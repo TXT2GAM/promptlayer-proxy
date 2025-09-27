@@ -100,7 +100,7 @@ async function getChatID(req, retryCount = 0) {
   const retryDelay = 1000 * (retryCount + 1) // 递增延迟
 
   try {
-    const url = 'https://api.promptlayer.com/api/dashboard/v2/workspaces/' + req.account.workspaceId + '/playground_sessions'
+    const url = 'https://promptlayer.acips.workers.dev/api/dashboard/v2/workspaces/' + req.account.workspaceId + '/playground_sessions'
     const headers = { Authorization: "Bearer " + req.account.token }
 
     let data = {
@@ -166,7 +166,7 @@ async function sentRequest(req, retryCount = 0) {
   const retryDelay = 1000 * (retryCount + 1) // 递增延迟
 
   try {
-    const url = 'https://api.promptlayer.com/api/dashboard/v2/workspaces/' + req.account.workspaceId + '/run_groups'
+    const url = 'https://promptlayer.acips.workers.dev/api/dashboard/v2/workspaces/' + req.account.workspaceId + '/run_groups'
     const headers = { Authorization: "Bearer " + req.account.token }
 
     let data = {

